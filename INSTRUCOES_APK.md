@@ -31,29 +31,42 @@ jobs:
           python -m pip install --upgrade pip
           pip install flet
       - name: Build APK
-        run: flet build apk
+        run: flet build apk --project "Leitor Acessível"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
+          name: LeitorAcessivel-APK
           path: build/apk/*.apk
 ```
 
-5.  Sempre que você fizer um `git push`, o GitHub vai gerar o APK. Você poderá baixá-lo na aba **Actions** do seu repositório.
+5.  Sempre que você fizer um `git push`, o GitHub vai gerar o APK. Você poderá baixá-lo na aba **Actions** do seu repositório. O arquivo baixado terá o nome **LeitorAcessivel-APK**.
 
 ---
 
 ## 💻 Opção 2: Configuração Local (Se você tiver Flutter instalado)
 
-Se você preferir gerar no seu computador, precisará:
+Se você preferir gerar no seu computador, precisará configurar o ambiente.
 
-1.  **Instalar o Flutter SDK:** [Guia de Instalação](https://docs.flutter.dev/get-started/install)
-2.  **Instalar o Android SDK:** (Vem com o Android Studio)
-3.  **Comando para gerar:**
-    Abra o terminal na pasta do projeto e execute:
-    ```bash
-    flet build apk
-    ```
+### 1. Instalar o Flutter SDK
+Você pode instalar manualmente seguindo o [Guia Oficial](https://docs.flutter.dev/get-started/install) ou usar o script que criei para facilitar (Linux/WSL):
+
+No terminal, execute:
+```bash
+chmod +x setup_flutter.sh
+./setup_flutter.sh
+```
+
+### 2. Instalar o Android SDK
+O Flet depende do Android SDK para criar o APK. A forma mais fácil é:
+1.  Baixar e instalar o [Android Studio](https://developer.android.com/studio).
+2.  Abrir o Android Studio e seguir o assistente para instalar o **Android SDK**, **Android SDK Command-line Tools** e o **CMake**.
+3.  Executar `flutter doctor` no terminal para garantir que tudo está ok.
+
+### 3. Comando para gerar
+Com o ambiente pronto, abra o terminal na pasta do projeto e execute:
+```bash
+flet build apk --project "Leitor Acessível"
+```
 
 ---
 

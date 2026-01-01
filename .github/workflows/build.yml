@@ -26,10 +26,10 @@ jobs:
           
       - name: Build APK
         run: |
-          flet build apk
+          flet build apk --project "Leitor Acessível"
           
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: leitor-acessivel-apk
+          name: LeitorAcessivel-APK
           path: build/apk/*.apk
