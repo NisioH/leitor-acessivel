@@ -14,8 +14,6 @@ import base64
 import shutil
 
 def check_tesseract_available():
-    # Long-term fix: Use shutil to check PATH before calling pytesseract
-    # This prevents the library from hanging or crashing on check
     tesseract_bin = shutil.which("tesseract")
     if tesseract_bin:
         try:
@@ -54,7 +52,6 @@ def ocr_online(image_bytes, language='por'):
         if result.get('IsErroredOnProcessing'):
             raise Exception(f"Erro no OCR: {result.get('ErrorMessage', 'Erro desconhecido')}")
 
-        # Extrair texto dos resultados
         parsed_results = result.get('ParsedResults', [])
         if parsed_results:
             text = parsed_results[0].get('ParsedText', '')
@@ -68,23 +65,18 @@ def ocr_online(image_bytes, language='por'):
 
 
 def main(page: ft.Page):
-    #page.debug = False  # Remove o banner de debug vermelho
     page.title = "Leitor Acessível"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 20
-    page.scroll = "adaptive"  # Permite scroll em telas pequenas
+    page.scroll = "adaptive"
 
-    # Configurações responsivas para mobile
     if page.web:
         page.theme = ft.Theme(
             page_transitions={"android": "zoom", "ios": "cupertino", "macos": "none"}
         )
 
-    # Player de Áudio - Inicialmente nulo para evitar erro de src vazio
     audio_player = None
-    # page.overlay.append(audio_player) # Removido para evitar erro de src vazio
 
-    # Área de texto - responsiva para mobile
     text_field = ft.TextField(
         label="Texto para leitura",
         multiline=True,
@@ -200,7 +192,6 @@ def main(page: ft.Page):
                 extracted_text = df.to_string(index=False)
 
             elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
-                # Ler imagem a partir de bytes (web) ou caminho local
                 if file_bytes is not None:
                     img = Image.open(BytesIO(file_bytes))
                     img_bytes_for_ocr = file_bytes
@@ -213,7 +204,6 @@ def main(page: ft.Page):
                 else:
                     raise ValueError("A imagem não pôde ser carregada.")
 
-                # Tentar OCR - robust logic for mobile/desktop
                 extracted_text = ""
                 ocr_method_used = ""
                 
@@ -225,7 +215,6 @@ def main(page: ft.Page):
                     except Exception:
                         extracted_text = ""
 
-                # Fallback to Online OCR if local failed or is missing
                 if not extracted_text.strip():
                     try:
                         text_field.value = "🌐 Extraindo texto (OCR online)..."
@@ -251,9 +240,7 @@ def main(page: ft.Page):
     page.overlay.append(file_picker)
 
     def open_camera(e):
-        # Para mobile, remover allowed_extensions pode ajudar o sistema a mostrar a opção de Câmera
-        # No Flet moderno, não há uma forma direta de "forçar" apenas a câmera sem passar pelo seletor do SO,
-        # mas garantir o tipo IMAGE é o caminho mais curto.
+
         file_picker.pick_files(
             allow_multiple=False,
             file_type=ft.FilePickerFileType.IMAGE,
@@ -268,10 +255,7 @@ def main(page: ft.Page):
                 download_url = f"uploads/{src_path}" if not src_path.startswith("/") else src_path
                 page.launch_url(download_url)
             else:
-                # Em mobile/desktop, o arquivo está em uploads/nome_do_arquivo
-                # Como o APK tem acesso limitado, apenas informamos onde está ou 
-                # poderíamos implementar um compartilhamento no futuro.
-                # Por enquanto, page.launch_url ainda é a melhor tentativa.
+
                 page.launch_url(src_path)
 
     download_button = ft.ElevatedButton(
@@ -319,7 +303,6 @@ def main(page: ft.Page):
                 try:
                     os.makedirs(upload_dir)
                 except Exception:
-                    # Se falhar (ex: Android), tenta usar diretório temporário
                     upload_dir = tempfile.gettempdir()
             
             audio_path_save = os.path.join(upload_dir, audio_name)
@@ -335,8 +318,6 @@ def main(page: ft.Page):
             tts = gTTS(text=text_value, lang='pt')
             tts.save(audio_path_save)
 
-            # No Flet, para arquivos locais fora da pasta assets/uploads,
-            # às vezes é necessário o caminho absoluto.
             if audio_player is None:
                 audio_player = ft.Audio(src=audio_name, autoplay=False)
                 page.overlay.append(audio_player)
@@ -529,8 +510,6 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 60 + "\n")
 
-    # Para build do APK, o Flet ignora view, port etc.
-    # Mas para desenvolvimento local, eles são essenciais.
     try:
         ft.app(
             target=main,
