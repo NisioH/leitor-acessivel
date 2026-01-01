@@ -11,13 +11,20 @@ import docx
 import pandas as pd
 import requests
 import base64
+import shutil
 
 def check_tesseract_available():
-    try:
-        pytesseract.get_tesseract_version()
-        return True
-    except:
-        return False
+    # Long-term fix: Use shutil to check PATH before calling pytesseract
+    # This prevents the library from hanging or crashing on check
+    tesseract_bin = shutil.which("tesseract")
+    if tesseract_bin:
+        try:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_bin
+            pytesseract.get_tesseract_version()
+            return True
+        except:
+            return False
+    return False
 
 
 def ocr_online(image_bytes, language='por'):
@@ -199,59 +206,41 @@ def main(page: ft.Page):
                     img_bytes_for_ocr = file_bytes
                 elif file_path:
                     img = Image.open(file_path)
-                    # Converter para bytes para uso no OCR online se necessário
+                    # Converter para bytes para uso no OCR online
                     img_buffer = BytesIO()
                     img.save(img_buffer, format='PNG')
                     img_bytes_for_ocr = img_buffer.getvalue()
                 else:
-                    raise ValueError("A imagem não pôde ser carregada (caminho e bytes ausentes).")
+                    raise ValueError("A imagem não pôde ser carregada.")
 
-                # Tentar OCR - primeiro local (Tesseract), depois online
+                # Tentar OCR - robust logic for mobile/desktop
+                extracted_text = ""
                 ocr_method_used = ""
-                tesseract_available = check_tesseract_available()
-
-                if tesseract_available:
-                    # Tentar Tesseract primeiro (mais rápido e offline)
+                
+                if check_tesseract_available():
                     try:
-                        text_field.value = "🔍 Extraindo texto da imagem (OCR local)..."
+                        text_field.value = "🔍 Extraindo texto (OCR local)..."
                         page.update()
                         extracted_text = pytesseract.image_to_string(img, lang='por')
-                        if extracted_text.strip():
-                            ocr_method_used = " ✓ [OCR Local]"
-                        else:
-                            tesseract_available = False  # Tentar online se não encontrou texto
                     except Exception:
-                        try:
-                            extracted_text = pytesseract.image_to_string(img)
-                            if extracted_text.strip():
-                                ocr_method_used = " ✓ [OCR Local]"
-                            else:
-                                tesseract_available = False
-                        except Exception:
-                            tesseract_available = False
+                        extracted_text = ""
 
-                # Se Tesseract falhou ou não está disponível, usar OCR online
-                if not tesseract_available or not extracted_text.strip():
+                # Fallback to Online OCR if local failed or is missing
+                if not extracted_text.strip():
                     try:
-                        text_field.value = "🌐 Extraindo texto da imagem (OCR online)...\nIsso pode levar alguns segundos..."
+                        text_field.value = "🌐 Extraindo texto (OCR online)..."
                         page.update()
                         extracted_text = ocr_online(img_bytes_for_ocr, language='por')
                         ocr_method_used = " ✓ [OCR Online]"
                     except Exception as ocr_ex:
-                        raise RuntimeError(
-                            f"❌ Erro ao extrair texto da imagem:\n\n"
-                            f"{str(ocr_ex)}\n\n"
-                            f"Dicas:\n"
-                            f"• Certifique-se de que a imagem tem texto legível\n"
-                            f"• Tente uma foto com melhor iluminação\n"
-                            f"• Verifique sua conexão com a internet (para OCR online)"
-                        )
+                        raise RuntimeError(f"Erro no OCR: {str(ocr_ex)}")
+                else:
+                    ocr_method_used = " ✓ [OCR Local]"
 
-                # Adicionar informação sobre método usado
                 if extracted_text.strip():
                     extracted_text = f"{extracted_text}\n\n---\n{ocr_method_used}"
 
-            text_field.value = extracted_text if extracted_text.strip() else "Nenhum texto encontrado no arquivo."
+                text_field.value = extracted_text if extracted_text.strip() else "Nenhum texto encontrado."
         except Exception as ex:
             text_field.value = f"Erro ao processar arquivo: {ex}"
 
