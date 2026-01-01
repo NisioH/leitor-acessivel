@@ -9,6 +9,60 @@ from gtts import gTTS
 import PyPDF2
 import docx
 import pandas as pd
+import requests
+import base64
+
+def check_tesseract_available():
+    """Verifica se o Tesseract está instalado e disponível"""
+    try:
+        pytesseract.get_tesseract_version()
+        return True
+    except:
+        return False
+
+
+def ocr_online(image_bytes, language='por'):
+    """
+    Realiza OCR usando API online gratuita (OCR.space)
+    Fallback quando Tesseract não está disponível
+    """
+    try:
+        # Converter imagem para base64
+        base64_image = base64.b64encode(image_bytes).decode()
+
+        # API gratuita OCR.space (500 requisições/dia)
+        url = "https://api.ocr.space/parse/image"
+
+        payload = {
+            'base64Image': f'data:image/png;base64,{base64_image}',
+            'language': language,
+            'isOverlayRequired': False,
+            'detectOrientation': True,
+            'scale': True,
+            'OCREngine': 2,  # Engine 2 é melhor para português
+        }
+
+        # Chave API gratuita (pública, limitada)
+        headers = {
+            'apikey': 'K87899142388957',  # Chave demo gratuita
+        }
+
+        response = requests.post(url, data=payload, headers=headers, timeout=30)
+        result = response.json()
+
+        if result.get('IsErroredOnProcessing'):
+            raise Exception(f"Erro no OCR: {result.get('ErrorMessage', 'Erro desconhecido')}")
+
+        # Extrair texto dos resultados
+        parsed_results = result.get('ParsedResults', [])
+        if parsed_results:
+            text = parsed_results[0].get('ParsedText', '')
+            return text
+        else:
+            raise Exception("Nenhum texto encontrado na imagem")
+
+    except Exception as e:
+        raise Exception(f"Erro no OCR online: {str(e)}")
 
 
 
@@ -172,6 +226,10 @@ def main(page: ft.Page):
 
     file_picker = ft.FilePicker(on_result=on_file_result, on_upload=on_upload_progress)
     page.overlay.append(file_picker)
+
+    # FilePicker específico para câmera (capture mode)
+    camera_picker = ft.FilePicker(on_result=on_file_result, on_upload=on_upload_progress)
+    page.overlay.append(camera_picker)
 
     download_button = ft.ElevatedButton(
         "Baixar Áudio (.mp3)",
