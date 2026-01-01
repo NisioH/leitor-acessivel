@@ -1,0 +1,20 @@
+[tool.flet]
+name = "Leitor Acessível"
+description = "Transforme fotos e arquivos em voz"
+version = "1.0.0"
+author = "NisioH"
+
+[tool.flet.android]
+package = "com.nisioh.leitoracessivel"
+permissions = [
+    "android.permission.INTERNET",
+    "android.permission.CAMERA",
+    "android.permission.READ_EXTERNAL_STORAGE",
+    "android.permission.WRITE_EXTERNAL_STORAGE"
+]
+
+[tool.flet.web]
+use_color_emoji = true
+
+[tool.flet.macos]
+bundle_id = "com.nisioh.leitoracessivel"

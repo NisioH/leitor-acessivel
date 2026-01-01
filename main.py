@@ -61,6 +61,7 @@ def ocr_online(image_bytes, language='por'):
 
 
 def main(page: ft.Page):
+    #page.debug = False  # Remove o banner de debug vermelho
     page.title = "Leitor Acessível"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 20
@@ -72,9 +73,9 @@ def main(page: ft.Page):
             page_transitions={"android": "zoom", "ios": "cupertino", "macos": "none"}
         )
 
-    # Player de Áudio
-    audio_player = ft.Audio(src="", autoplay=False)
-    page.overlay.append(audio_player)
+    # Player de Áudio - Inicialmente nulo para evitar erro de src vazio
+    audio_player = None
+    # page.overlay.append(audio_player) # Removido para evitar erro de src vazio
 
     # Área de texto - responsiva para mobile
     text_field = ft.TextField(
@@ -88,7 +89,13 @@ def main(page: ft.Page):
     )
 
     # Indicador de carregamento
-    loading_indicator = ft.ProgressBar(visible=False)
+    loading_indicator = ft.ProgressBar(
+        visible=False,
+        color=ft.Colors.BLUE_400,
+        bgcolor=ft.Colors.BLUE_50
+    )
+
+    audio_added = False
 
     def on_file_result(e: ft.FilePickerResultEvent):
         if not e.files:
@@ -254,46 +261,65 @@ def main(page: ft.Page):
     file_picker = ft.FilePicker(on_result=on_file_result, on_upload=on_upload_progress)
     page.overlay.append(file_picker)
 
-    camera_picker = ft.FilePicker(on_result=on_file_result, on_upload=on_upload_progress)
-    page.overlay.append(camera_picker)
+    def open_camera(e):
+        # Para mobile, remover allowed_extensions pode ajudar o sistema a mostrar a opção de Câmera
+        # No Flet moderno, não há uma forma direta de "forçar" apenas a câmera sem passar pelo seletor do SO,
+        # mas garantir o tipo IMAGE é o caminho mais curto.
+        file_picker.pick_files(
+            allow_multiple=False,
+            file_type=ft.FilePickerFileType.IMAGE,
+        )
 
     def download_audio(e):
-        if audio_player.src:
-            if page.web:
-                download_url = f"/{audio_player.src}" if not audio_player.src.startswith("/") else audio_player.src
-                page.launch_url(download_url)
-            else:
-                page.launch_url(audio_player.src)
+        if audio_player is not None and audio_player.src:
+            # Em alguns ambientes, pode ser necessário o caminho completo
+            src_path = audio_player.src
+            download_url = f"uploads/{src_path}" if not src_path.startswith("/") else src_path
+            page.launch_url(download_url)
 
     download_button = ft.ElevatedButton(
-        "📥 Baixar Áudio",
+        "📥 Baixar MP3",
         icon=ft.Icons.DOWNLOAD,
         visible=False,
         on_click=download_audio,
-        tooltip="Baixar arquivo MP3"
+        tooltip="Baixar ou compartilhar áudio",
+        style=ft.ButtonStyle(
+            bgcolor=ft.Colors.BLUE_700,
+            color=ft.Colors.WHITE,
+        )
+    )
+
+    audio_status = ft.Text(
+        "",
+        size=12,
+        color=ft.Colors.GREEN_700,
+        weight="bold",
+        text_align=ft.TextAlign.CENTER,
+        visible=False
     )
 
     def convert_and_play(e):
-        print("convert_and_play chamado")
+        nonlocal audio_added, audio_player
         text_value = (text_field.value or "").strip()
         if not text_value:
             text_field.value = "Nenhum texto para converter."
             page.update()
             return
-        
+
         loading_indicator.visible = True
         download_button.visible = False
+        audio_status.visible = False
         page.update()
 
         try:
             import time
             timestamp = int(time.time())
             audio_name = f"leitura_{timestamp}.mp3"
-            
+
             upload_dir = "uploads"
             if not os.path.exists(upload_dir):
                 os.makedirs(upload_dir)
-            
+
             audio_path_save = os.path.join(upload_dir, audio_name)
 
             for f in os.listdir(upload_dir):
@@ -305,11 +331,24 @@ def main(page: ft.Page):
 
             tts = gTTS(text=text_value, lang='pt')
             tts.save(audio_path_save)
+
+            if audio_player is None:
+                audio_player = ft.Audio(src=audio_name, autoplay=False)
+                page.overlay.append(audio_player)
+                audio_added = True
+            else:
+                audio_player.src = audio_name
+                if not audio_added:
+                    page.overlay.append(audio_player)
+                    audio_added = True
             
-            audio_player.src = audio_name
+            audio_player.volume = 1
+
             download_button.visible = True
+            audio_status.value = "🔊 Áudio pronto! Tocando..."
+            audio_status.visible = True
             page.update()
-            
+
             success = False
             for _ in range(5):
                 try:
@@ -318,11 +357,14 @@ def main(page: ft.Page):
                     break
                 except:
                     time.sleep(0.2)
-            
+
             if not success:
-                raise Exception("Não foi possível iniciar o áudio.")
+                audio_status.value = "⚠️ Áudio gerado, mas não tocou automaticamente. Use o botão de download."
+                audio_status.color = ft.Colors.ORANGE_700
         except Exception as ex:
-            text_field.value = f"Erro ao gerar áudio: {ex}"
+            audio_status.value = f"❌ Erro: {ex}"
+            audio_status.color = ft.Colors.RED_700
+            audio_status.visible = True
         
         loading_indicator.visible = False
         page.update()
@@ -357,13 +399,11 @@ def main(page: ft.Page):
             ft.Row([
                 ft.Container(
                     content=ft.ElevatedButton(
-                        "📷 Câmera",
+                        "📷 Foto",
                         icon=ft.Icons.CAMERA_ALT,
-                        on_click=lambda _: camera_picker.pick_files(
-                            allowed_extensions=["jpg", "jpeg", "png"],
-                            allow_multiple=False,
-                        ),
+                        on_click=open_camera,
                         height=50,
+                        tooltip="Tire uma foto ou escolha da galeria",
                         style=ft.ButtonStyle(
                             bgcolor=ft.Colors.BLUE_700,
                             color=ft.Colors.WHITE,
@@ -387,12 +427,22 @@ def main(page: ft.Page):
                     expand=1,
                 ),
             ], spacing=10),
-            ft.Text(
-                "Imagens • PDF • DOCX • XLSX • TXT",
-                size=12,
-                color=ft.Colors.GREY_600,
-                text_align=ft.TextAlign.CENTER
-            ),
+            ft.Column([
+                ft.Text(
+                    "Imagens • PDF • DOCX • XLSX • TXT",
+                    size=12,
+                    color=ft.Colors.GREY_600,
+                    text_align=ft.TextAlign.CENTER
+                ),
+                ft.Text(
+                    "💡 Dica: No botão Foto, escolha 'Câmera' para tirar na hora",
+                    size=11,
+                    color=ft.Colors.BLUE_600,
+                    text_align=ft.TextAlign.CENTER,
+                    italic=True,
+                    visible=page.web
+                ),
+            ], spacing=5, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
             loading_indicator,
             ft.Container(
                 content=text_field,
@@ -400,6 +450,7 @@ def main(page: ft.Page):
             ),
             ft.Container(
                 content=ft.Column([
+                    audio_status,
                     ft.ElevatedButton(
                         "🔊 Ouvir Texto",
                         icon=ft.Icons.PLAY_ARROW,
@@ -420,6 +471,34 @@ def main(page: ft.Page):
         )
     )
 
+def get_local_ip():
+    import socket
+    import subprocess
+
+    try:
+        result = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
+        ips = result.stdout.strip().split()
+        for ip in ips:
+            if ip.startswith('192.168.') or ip.startswith('10.'):
+                return ip
+        if ips:
+            return ips[0]
+    except:
+        pass
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if not ip.startswith('127.'):
+            return ip
+    except:
+        pass
+
+    return None
+
+
 if __name__ == "__main__":
     if not os.path.exists("uploads"):
         os.makedirs("uploads")
@@ -430,18 +509,21 @@ if __name__ == "__main__":
     print("🚀 Iniciando Leitor Acessível...")
     print("=" * 60)
 
+    local_ip = get_local_ip()
+
+    if local_ip:
+        print(f"\n📱 ACESSE NO CELULAR (App Flet):")
+        print(f"   http://{local_ip}:8550")
+        print(f"\n💻 Ou no navegador do computador:")
+        print(f"   http://localhost:8550")
+    else:
+        print(f"\n⚠️  Não foi possível detectar o IP automaticamente.")
+        print(f"\n📋 Descubra seu IP com: hostname -I")
+        print(f"   Depois use: http://SEU_IP:8550")
+
+    print("\n" + "=" * 60 + "\n")
+
     try:
-        import socket
-        hostname = socket.gethostname()
-        try:
-            local_ip = socket.gethostbyname(hostname)
-            print(f"\n📱 Acesse no celular em: http://{local_ip}:8550")
-        except:
-            print(f"\n📱 Acesse no celular em: http://SEU_IP_LOCAL:8550")
-
-        print(f"💻 Ou no computador em: http://localhost:8550\n")
-        print("=" * 60)
-
         ft.app(
             target=main,
             view=ft.AppView.WEB_BROWSER,
