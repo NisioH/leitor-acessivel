@@ -13,23 +13,30 @@ import pandas as pd
 
 
 def main(page: ft.Page):
-    page.title = "Leitor de Texto para Áudio"
+    page.title = "Leitor Acessível"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 20
-    page.window.width = 600
-    page.window.height = 800
+    page.scroll = "adaptive"  # Permite scroll em telas pequenas
+
+    # Configurações responsivas para mobile
+    if page.web:
+        page.theme = ft.Theme(
+            page_transitions={"android": "zoom", "ios": "cupertino", "macos": "none"}
+        )
 
     # Player de Áudio
     audio_player = ft.Audio(src="", autoplay=False)
     page.overlay.append(audio_player)
 
-    # Área de texto
+    # Área de texto - responsiva para mobile
     text_field = ft.TextField(
         label="Texto para leitura",
         multiline=True,
-        min_lines=10,
-        max_lines=15,
-        hint_text="O texto extraído aparecerá aqui..."
+        min_lines=5,
+        max_lines=20,
+        hint_text="O texto extraído aparecerá aqui...",
+        expand=False,
+        text_size=14,
     )
 
     # Indicador de carregamento
@@ -41,7 +48,7 @@ def main(page: ft.Page):
             return
 
         file_info = e.files[0]
-        # Se estamos na web e não temos bytes nem path, precisamos fazer o upload
+     
         if page.web and not file_info.path and not getattr(file_info, "bytes", None):
             loading_indicator.visible = True
             page.update()
@@ -59,15 +66,13 @@ def main(page: ft.Page):
 
     def on_upload_progress(e: ft.FilePickerUploadEvent):
         if e.progress == 1.0:
-            # Quando o upload termina, o arquivo está no diretório configurado
             class FakeFileInfo:
                 def __init__(self, name, path):
                     self.name = name
                     self.path = path
                     self.bytes = None
             
-            # O arquivo é salvo no subdiretório 'uploads' (conforme upload_dir configurado)
-            # Mas o caminho absoluto é necessário para abrir com open() se não estiver no CWD
+            
             uploaded_file_path = os.path.join(os.getcwd(), "uploads", e.file_name)
             process_file(FakeFileInfo(e.file_name, uploaded_file_path))
         elif e.error:
@@ -82,9 +87,6 @@ def main(page: ft.Page):
         file_bytes = getattr(file_info, "bytes", None)
         file_name = getattr(file_info, "name", "uploaded_file")
         file_path = file_info.path
-
-        # Se o path for relativo, tenta torná-lo absoluto se necessário, 
-        # mas o open() deve funcionar se estiver no diretório de trabalho
 
         try:
             extracted_text = ""
@@ -135,12 +137,9 @@ def main(page: ft.Page):
                 else:
                     raise ValueError("O arquivo Excel não pôde ser carregado.")
                 
-                # Converte o dataframe para string, removendo índices e nomes de colunas se preferir,
-                # ou apenas concatenando os valores de forma legível.
                 extracted_text = df.to_string(index=False)
 
             elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
-                # Ler imagem a partir de bytes (web) ou caminho local
                 if file_bytes is not None:
                     img = Image.open(BytesIO(file_bytes))
                 elif file_path:
@@ -148,14 +147,21 @@ def main(page: ft.Page):
                 else:
                     raise ValueError("A imagem não pôde ser carregada (caminho e bytes ausentes).")
 
-                # Verifica se o tesseract está acessível
                 try:
                     extracted_text = pytesseract.image_to_string(img, lang='por')
-                except Exception:
+                except Exception as first_ex:
                     try:
                         extracted_text = pytesseract.image_to_string(img)
                     except Exception as t_ex:
-                        raise RuntimeError(f"Erro no Tesseract: {t_ex}")
+                        # OCR pode não estar disponível em mobile/web
+                        if page.web:
+                            raise RuntimeError(
+                                "⚠️ OCR de imagens não está disponível na versão web/mobile.\n\n"
+                                "Para extrair texto de imagens, use a versão desktop instalada localmente.\n"
+                                "Você pode usar arquivos PDF, DOCX, XLSX ou TXT normalmente."
+                            )
+                        else:
+                            raise RuntimeError(f"Erro no Tesseract: {t_ex}\n\nCertifique-se de que o Tesseract OCR está instalado.")
 
             text_field.value = extracted_text if extracted_text.strip() else "Nenhum texto encontrado no arquivo."
         except Exception as ex:
@@ -167,7 +173,6 @@ def main(page: ft.Page):
     file_picker = ft.FilePicker(on_result=on_file_result, on_upload=on_upload_progress)
     page.overlay.append(file_picker)
 
-    # Botão de download
     download_button = ft.ElevatedButton(
         "Baixar Áudio (.mp3)",
         icon=ft.Icons.DOWNLOAD,
@@ -189,21 +194,15 @@ def main(page: ft.Page):
 
         try:
             import time
-            # Gera um nome de arquivo único para evitar conflitos e problemas de cache
             timestamp = int(time.time())
             audio_name = f"leitura_{timestamp}.mp3"
             
-            # Usar o diretório de uploads que já é servido pelo Flet
             upload_dir = "uploads"
             if not os.path.exists(upload_dir):
                 os.makedirs(upload_dir)
             
             audio_path_save = os.path.join(upload_dir, audio_name)
 
-            # Limpa arquivos antigos de leitura no diretório de uploads
-            # Mantemos os arquivos por um tempo ou apenas deletamos se necessário
-            # Para economizar espaço, vamos manter apenas o último, 
-            # mas agora o usuário tem a chance de baixar.
             for f in os.listdir(upload_dir):
                 if f.startswith("leitura_") and f.endswith(".mp3"):
                     try:
@@ -214,14 +213,10 @@ def main(page: ft.Page):
             tts = gTTS(text=text_value, lang='pt')
             tts.save(audio_path_save)
             
-            # No Flet, arquivos em upload_dir são servidos na raiz ou via / se configurado.
-            # Quando upload_dir é definido no ft.app(), os arquivos são acessíveis via URL.
-            # Para o componente Audio na web, usamos o nome do arquivo se ele estiver no upload_dir.
             audio_player.src = audio_name
             download_button.visible = True
             page.update()
             
-            # Tenta tocar, se falhar pode ser porque o arquivo ainda não está pronto no sistema de arquivos
             success = False
             for _ in range(5):
                 try:
@@ -239,43 +234,86 @@ def main(page: ft.Page):
         loading_indicator.visible = False
         page.update()
 
-    # Layout
+    # Layout responsivo para mobile
+    # Aviso sobre OCR em mobile
+    ocr_warning = ft.Container(
+        content=ft.Row([
+            ft.Icon(ft.Icons.INFO_OUTLINE, color=ft.Colors.ORANGE_700, size=20),
+            ft.Text(
+                "⚠️ OCR de imagens não disponível na versão web/mobile",
+                size=12,
+                color=ft.Colors.ORANGE_700,
+                weight="bold"
+            )
+        ], tight=True),
+        bgcolor=ft.Colors.ORANGE_50,
+        border_radius=8,
+        padding=10,
+        visible=page.web
+    )
+
     page.add(
         ft.Column([
-            ft.Text("Leitor Acessível", size=30, weight="bold"),
-            ft.Text("Transforme fotos da lousa ou arquivos de texto em voz."),
+            ft.Text("Leitor Acessível", size=28, weight="bold", text_align=ft.TextAlign.CENTER),
+            ft.Text(
+                "Transforme arquivos de texto em voz",
+                size=14,
+                text_align=ft.TextAlign.CENTER,
+                color=ft.Colors.GREY_700
+            ),
             ft.Divider(),
-            ft.ElevatedButton(
-                "1. Selecionar Arquivo (Foto, PDF, DOCX, XLSX, TXT)",
-                icon=ft.Icons.UPLOAD_FILE,
-                on_click=lambda _: file_picker.pick_files(
-                    allowed_extensions=["txt", "png", "jpg", "jpeg", "pdf", "docx", "xlsx", "xls"]
-                )
+            ocr_warning,
+            ft.Container(
+                content=ft.ElevatedButton(
+                    "📁 Selecionar Arquivo",
+                    icon=ft.Icons.UPLOAD_FILE,
+                    on_click=lambda _: file_picker.pick_files(
+                        allowed_extensions=["txt", "pdf", "docx", "xlsx", "xls"] if page.web else ["txt", "png", "jpg", "jpeg", "pdf", "docx", "xlsx", "xls"]
+                    ),
+                    width=300,
+                    height=50,
+                ),
+                alignment=ft.alignment.center
+            ),
+            ft.Text(
+                "PDF • DOCX • XLSX • TXT" + ("" if page.web else " • Imagens"),
+                size=12,
+                color=ft.Colors.GREY_600,
+                text_align=ft.TextAlign.CENTER
             ),
             loading_indicator,
-            text_field,
-            ft.Row([
-                ft.ElevatedButton(
-                    "2. Ouvir Texto",
-                    icon=ft.Icons.PLAY_ARROW,
-                    bgcolor=ft.Colors.GREEN_700,
-                    color=ft.Colors.WHITE,
-                    on_click=convert_and_play
-                ),
-                download_button
-            ], alignment=ft.MainAxisAlignment.CENTER)
-        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=20)
+            ft.Container(
+                content=text_field,
+                expand=True,
+            ),
+            ft.Container(
+                content=ft.Column([
+                    ft.ElevatedButton(
+                        "🔊 Ouvir Texto",
+                        icon=ft.Icons.PLAY_ARROW,
+                        bgcolor=ft.Colors.GREEN_700,
+                        color=ft.Colors.WHITE,
+                        on_click=convert_and_play,
+                        width=300,
+                        height=50,
+                    ),
+                    download_button
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                alignment=ft.alignment.center
+            )
+        ], 
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        spacing=15,
+        scroll=ft.ScrollMode.AUTO
+        )
     )
 
 if __name__ == "__main__":
-    # Garante que o diretório de uploads existe
     if not os.path.exists("uploads"):
         os.makedirs("uploads")
 
-    # Define a chave secreta via variável de ambiente para evitar TypeError no ft.app()
     os.environ["FLET_SECRET_KEY"] = "some_secret_key"
 
-    # Preferir modo web no Linux (evita problemas com GTK/OpenGL no desktop)
     if sys.platform.startswith("linux"):
         print("Iniciando Flet em modo web (Linux detected)")
         ft.app(
