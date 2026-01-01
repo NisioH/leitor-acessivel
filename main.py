@@ -272,10 +272,18 @@ def main(page: ft.Page):
 
     def download_audio(e):
         if audio_player is not None and audio_player.src:
-            # Em alguns ambientes, pode ser necessário o caminho completo
             src_path = audio_player.src
-            download_url = f"uploads/{src_path}" if not src_path.startswith("/") else src_path
-            page.launch_url(download_url)
+            
+            # Se for web, tenta baixar via URL
+            if page.web:
+                download_url = f"uploads/{src_path}" if not src_path.startswith("/") else src_path
+                page.launch_url(download_url)
+            else:
+                # Em mobile/desktop, o arquivo está em uploads/nome_do_arquivo
+                # Como o APK tem acesso limitado, apenas informamos onde está ou 
+                # poderíamos implementar um compartilhamento no futuro.
+                # Por enquanto, page.launch_url ainda é a melhor tentativa.
+                page.launch_url(src_path)
 
     download_button = ft.ElevatedButton(
         "📥 Baixar MP3",
@@ -316,12 +324,18 @@ def main(page: ft.Page):
             timestamp = int(time.time())
             audio_name = f"leitura_{timestamp}.mp3"
 
+            # Pasta de uploads (funciona no PC e será incluída no APK)
             upload_dir = "uploads"
             if not os.path.exists(upload_dir):
-                os.makedirs(upload_dir)
-
+                try:
+                    os.makedirs(upload_dir)
+                except Exception:
+                    # Se falhar (ex: Android), tenta usar diretório temporário
+                    upload_dir = tempfile.gettempdir()
+            
             audio_path_save = os.path.join(upload_dir, audio_name)
 
+            # Limpar áudios antigos
             for f in os.listdir(upload_dir):
                 if f.startswith("leitura_") and f.endswith(".mp3"):
                     try:
@@ -332,6 +346,8 @@ def main(page: ft.Page):
             tts = gTTS(text=text_value, lang='pt')
             tts.save(audio_path_save)
 
+            # No Flet, para arquivos locais fora da pasta assets/uploads,
+            # às vezes é necessário o caminho absoluto.
             if audio_player is None:
                 audio_player = ft.Audio(src=audio_name, autoplay=False)
                 page.overlay.append(audio_player)
@@ -501,7 +517,10 @@ def get_local_ip():
 
 if __name__ == "__main__":
     if not os.path.exists("uploads"):
-        os.makedirs("uploads")
+        try:
+            os.makedirs("uploads")
+        except:
+            pass
 
     os.environ["FLET_SECRET_KEY"] = "leitor_acessivel_secret_2024"
 
@@ -518,24 +537,19 @@ if __name__ == "__main__":
         print(f"   http://localhost:8550")
     else:
         print(f"\n⚠️  Não foi possível detectar o IP automaticamente.")
-        print(f"\n📋 Descubra seu IP com: hostname -I")
-        print(f"   Depois use: http://SEU_IP:8550")
 
     print("\n" + "=" * 60 + "\n")
 
+    # Para build do APK, o Flet ignora view, port etc.
+    # Mas para desenvolvimento local, eles são essenciais.
     try:
         ft.app(
             target=main,
             view=ft.AppView.WEB_BROWSER,
             upload_dir="uploads",
+            assets_dir="uploads",
             port=8550,
         )
     except Exception as e:
-        print(f"⚠️ Erro ao iniciar na porta 8550: {e}")
-        print("Tentando porta alternativa 8080...")
-        ft.app(
-            target=main,
-            view=ft.AppView.WEB_BROWSER,
-            upload_dir="uploads",
-            port=8080,
-        )
+        print(f"⚠️ Erro ao iniciar: {e}")
+        ft.app(target=main, upload_dir="uploads", assets_dir="uploads")
