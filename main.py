@@ -13,7 +13,6 @@ import requests
 import base64
 
 def check_tesseract_available():
-    """Verifica se o Tesseract está instalado e disponível"""
     try:
         pytesseract.get_tesseract_version()
         return True
@@ -22,15 +21,10 @@ def check_tesseract_available():
 
 
 def ocr_online(image_bytes, language='por'):
-    """
-    Realiza OCR usando API online gratuita (OCR.space)
-    Fallback quando Tesseract não está disponível
-    """
+    
     try:
-        # Converter imagem para base64
         base64_image = base64.b64encode(image_bytes).decode()
 
-        # API gratuita OCR.space (500 requisições/dia)
         url = "https://api.ocr.space/parse/image"
 
         payload = {
@@ -97,16 +91,15 @@ def main(page: ft.Page):
     loading_indicator = ft.ProgressBar(visible=False)
 
     def on_file_result(e: ft.FilePickerResultEvent):
-        print("on_file_result chamado, arquivos:", e.files)
         if not e.files:
             return
 
         file_info = e.files[0]
-     
+
         if page.web and not file_info.path and not getattr(file_info, "bytes", None):
             loading_indicator.visible = True
             page.update()
-            
+
             upload_url = page.get_upload_url(file_info.name, 600)
             file_picker.upload([
                 ft.FilePickerUploadFile(
@@ -125,7 +118,6 @@ def main(page: ft.Page):
                     self.name = name
                     self.path = path
                     self.bytes = None
-            
             
             uploaded_file_path = os.path.join(os.getcwd(), "uploads", e.file_name)
             process_file(FakeFileInfo(e.file_name, uploaded_file_path))
@@ -194,28 +186,63 @@ def main(page: ft.Page):
                 extracted_text = df.to_string(index=False)
 
             elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
+                # Ler imagem a partir de bytes (web) ou caminho local
                 if file_bytes is not None:
                     img = Image.open(BytesIO(file_bytes))
+                    img_bytes_for_ocr = file_bytes
                 elif file_path:
                     img = Image.open(file_path)
+                    # Converter para bytes para uso no OCR online se necessário
+                    img_buffer = BytesIO()
+                    img.save(img_buffer, format='PNG')
+                    img_bytes_for_ocr = img_buffer.getvalue()
                 else:
                     raise ValueError("A imagem não pôde ser carregada (caminho e bytes ausentes).")
 
-                try:
-                    extracted_text = pytesseract.image_to_string(img, lang='por')
-                except Exception as first_ex:
+                # Tentar OCR - primeiro local (Tesseract), depois online
+                ocr_method_used = ""
+                tesseract_available = check_tesseract_available()
+
+                if tesseract_available:
+                    # Tentar Tesseract primeiro (mais rápido e offline)
                     try:
-                        extracted_text = pytesseract.image_to_string(img)
-                    except Exception as t_ex:
-                        # OCR pode não estar disponível em mobile/web
-                        if page.web:
-                            raise RuntimeError(
-                                "⚠️ OCR de imagens não está disponível na versão web/mobile.\n\n"
-                                "Para extrair texto de imagens, use a versão desktop instalada localmente.\n"
-                                "Você pode usar arquivos PDF, DOCX, XLSX ou TXT normalmente."
-                            )
+                        text_field.value = "🔍 Extraindo texto da imagem (OCR local)..."
+                        page.update()
+                        extracted_text = pytesseract.image_to_string(img, lang='por')
+                        if extracted_text.strip():
+                            ocr_method_used = " ✓ [OCR Local]"
                         else:
-                            raise RuntimeError(f"Erro no Tesseract: {t_ex}\n\nCertifique-se de que o Tesseract OCR está instalado.")
+                            tesseract_available = False  # Tentar online se não encontrou texto
+                    except Exception:
+                        try:
+                            extracted_text = pytesseract.image_to_string(img)
+                            if extracted_text.strip():
+                                ocr_method_used = " ✓ [OCR Local]"
+                            else:
+                                tesseract_available = False
+                        except Exception:
+                            tesseract_available = False
+
+                # Se Tesseract falhou ou não está disponível, usar OCR online
+                if not tesseract_available or not extracted_text.strip():
+                    try:
+                        text_field.value = "🌐 Extraindo texto da imagem (OCR online)...\nIsso pode levar alguns segundos..."
+                        page.update()
+                        extracted_text = ocr_online(img_bytes_for_ocr, language='por')
+                        ocr_method_used = " ✓ [OCR Online]"
+                    except Exception as ocr_ex:
+                        raise RuntimeError(
+                            f"❌ Erro ao extrair texto da imagem:\n\n"
+                            f"{str(ocr_ex)}\n\n"
+                            f"Dicas:\n"
+                            f"• Certifique-se de que a imagem tem texto legível\n"
+                            f"• Tente uma foto com melhor iluminação\n"
+                            f"• Verifique sua conexão com a internet (para OCR online)"
+                        )
+
+                # Adicionar informação sobre método usado
+                if extracted_text.strip():
+                    extracted_text = f"{extracted_text}\n\n---\n{ocr_method_used}"
 
             text_field.value = extracted_text if extracted_text.strip() else "Nenhum texto encontrado no arquivo."
         except Exception as ex:
@@ -227,15 +254,23 @@ def main(page: ft.Page):
     file_picker = ft.FilePicker(on_result=on_file_result, on_upload=on_upload_progress)
     page.overlay.append(file_picker)
 
-    # FilePicker específico para câmera (capture mode)
     camera_picker = ft.FilePicker(on_result=on_file_result, on_upload=on_upload_progress)
     page.overlay.append(camera_picker)
 
+    def download_audio(e):
+        if audio_player.src:
+            if page.web:
+                download_url = f"/{audio_player.src}" if not audio_player.src.startswith("/") else audio_player.src
+                page.launch_url(download_url)
+            else:
+                page.launch_url(audio_player.src)
+
     download_button = ft.ElevatedButton(
-        "Baixar Áudio (.mp3)",
+        "📥 Baixar Áudio",
         icon=ft.Icons.DOWNLOAD,
         visible=False,
-        on_click=lambda _: page.launch_url(audio_player.src)
+        on_click=download_audio,
+        tooltip="Baixar arquivo MP3"
     )
 
     def convert_and_play(e):
@@ -292,49 +327,68 @@ def main(page: ft.Page):
         loading_indicator.visible = False
         page.update()
 
-    # Layout responsivo para mobile
-    # Aviso sobre OCR em mobile
-    ocr_warning = ft.Container(
+    tesseract_available = check_tesseract_available()
+    ocr_info = ft.Container(
         content=ft.Row([
-            ft.Icon(ft.Icons.INFO_OUTLINE, color=ft.Colors.ORANGE_700, size=20),
+            ft.Icon(ft.Icons.INFO_OUTLINE, color=ft.Colors.BLUE_700, size=20),
             ft.Text(
-                "⚠️ OCR de imagens não disponível na versão web/mobile",
+                f"{'✅ OCR Local + Online' if tesseract_available else '🌐 OCR Online'} disponível",
                 size=12,
-                color=ft.Colors.ORANGE_700,
+                color=ft.Colors.BLUE_700,
                 weight="bold"
             )
         ], tight=True),
-        bgcolor=ft.Colors.ORANGE_50,
+        bgcolor=ft.Colors.BLUE_50,
         border_radius=8,
         padding=10,
-        visible=page.web
     )
 
     page.add(
         ft.Column([
             ft.Text("Leitor Acessível", size=28, weight="bold", text_align=ft.TextAlign.CENTER),
             ft.Text(
-                "Transforme arquivos de texto em voz",
+                "Transforme fotos e arquivos em voz",
                 size=14,
                 text_align=ft.TextAlign.CENTER,
                 color=ft.Colors.GREY_700
             ),
             ft.Divider(),
-            ocr_warning,
-            ft.Container(
-                content=ft.ElevatedButton(
-                    "📁 Selecionar Arquivo",
-                    icon=ft.Icons.UPLOAD_FILE,
-                    on_click=lambda _: file_picker.pick_files(
-                        allowed_extensions=["txt", "pdf", "docx", "xlsx", "xls"] if page.web else ["txt", "png", "jpg", "jpeg", "pdf", "docx", "xlsx", "xls"]
+            ocr_info,
+            ft.Row([
+                ft.Container(
+                    content=ft.ElevatedButton(
+                        "📷 Câmera",
+                        icon=ft.Icons.CAMERA_ALT,
+                        on_click=lambda _: camera_picker.pick_files(
+                            allowed_extensions=["jpg", "jpeg", "png"],
+                            allow_multiple=False,
+                        ),
+                        height=50,
+                        style=ft.ButtonStyle(
+                            bgcolor=ft.Colors.BLUE_700,
+                            color=ft.Colors.WHITE,
+                        )
                     ),
-                    width=300,
-                    height=50,
+                    expand=1,
                 ),
-                alignment=ft.alignment.center
-            ),
+                ft.Container(
+                    content=ft.ElevatedButton(
+                        "📁 Arquivo",
+                        icon=ft.Icons.UPLOAD_FILE,
+                        on_click=lambda _: file_picker.pick_files(
+                            allowed_extensions=["txt", "png", "jpg", "jpeg", "pdf", "docx", "xlsx", "xls", "bmp"]
+                        ),
+                        height=50,
+                        style=ft.ButtonStyle(
+                            bgcolor=ft.Colors.PURPLE_700,
+                            color=ft.Colors.WHITE,
+                        )
+                    ),
+                    expand=1,
+                ),
+            ], spacing=10),
             ft.Text(
-                "PDF • DOCX • XLSX • TXT" + ("" if page.web else " • Imagens"),
+                "Imagens • PDF • DOCX • XLSX • TXT",
                 size=12,
                 color=ft.Colors.GREY_600,
                 text_align=ft.TextAlign.CENTER
@@ -359,7 +413,7 @@ def main(page: ft.Page):
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
                 alignment=ft.alignment.center
             )
-        ], 
+        ],
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         spacing=15,
         scroll=ft.ScrollMode.AUTO
@@ -370,22 +424,36 @@ if __name__ == "__main__":
     if not os.path.exists("uploads"):
         os.makedirs("uploads")
 
-    os.environ["FLET_SECRET_KEY"] = "some_secret_key"
+    os.environ["FLET_SECRET_KEY"] = "leitor_acessivel_secret_2024"
 
-    if sys.platform.startswith("linux"):
-        print("Iniciando Flet em modo web (Linux detected)")
+    print("=" * 60)
+    print("🚀 Iniciando Leitor Acessível...")
+    print("=" * 60)
+
+    try:
+        import socket
+        hostname = socket.gethostname()
+        try:
+            local_ip = socket.gethostbyname(hostname)
+            print(f"\n📱 Acesse no celular em: http://{local_ip}:8550")
+        except:
+            print(f"\n📱 Acesse no celular em: http://SEU_IP_LOCAL:8550")
+
+        print(f"💻 Ou no computador em: http://localhost:8550\n")
+        print("=" * 60)
+
         ft.app(
             target=main,
             view=ft.AppView.WEB_BROWSER,
             upload_dir="uploads",
+            port=8550,
         )
-    else:
-        try:
-            ft.app(target=main, upload_dir="uploads")
-        except Exception as e:
-            print(f"Erro ao iniciar modo desktop, tentando modo web: {e}")
-            ft.app(
-                target=main,
-                view=ft.AppView.WEB_BROWSER,
-                upload_dir="uploads",
-            )
+    except Exception as e:
+        print(f"⚠️ Erro ao iniciar na porta 8550: {e}")
+        print("Tentando porta alternativa 8080...")
+        ft.app(
+            target=main,
+            view=ft.AppView.WEB_BROWSER,
+            upload_dir="uploads",
+            port=8080,
+        )
