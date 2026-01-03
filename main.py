@@ -8,7 +8,6 @@ from PIL import Image
 from gtts import gTTS
 import PyPDF2
 import docx
-import pandas as pd
 import requests
 import base64
 import shutil
@@ -186,14 +185,24 @@ def main(page: ft.Page):
                     extracted_text += para.text + "\n"
 
             elif ext in [".xlsx", ".xls"]:
-                if file_bytes is not None:
-                    df = pd.read_excel(BytesIO(file_bytes))
-                elif file_path:
-                    df = pd.read_excel(file_path)
-                else:
-                    raise ValueError("O arquivo Excel não pôde ser carregado.")
-                
-                extracted_text = df.to_string(index=False)
+                try:
+                    import openpyxl
+                    if file_bytes is not None:
+                        wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
+                    elif file_path:
+                        wb = openpyxl.load_workbook(file_path, data_only=True)
+                    else:
+                        raise ValueError("O arquivo Excel não pôde ser carregado.")
+                    
+                    sheet = wb.active
+                    rows = []
+                    for row in sheet.iter_rows(values_only=True):
+                        rows.append("\t".join([str(cell) if cell is not None else "" for cell in row]))
+                    extracted_text = "\n".join(rows)
+                except ImportError:
+                    extracted_text = "Erro: Biblioteca openpyxl não instalada para ler Excel."
+                except Exception as e:
+                    extracted_text = f"Erro ao ler Excel: {str(e)}"
 
             elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
                 if file_bytes is not None:

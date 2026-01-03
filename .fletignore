@@ -1,0 +1,31 @@
+# Ignore temporary and build files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.env
+
+# Ignore uploads and assets that shouldn't be in the APK
+uploads/
+*.mp3
+*.pdf
+*.docx
+*.xlsx
+*.xls
+*.jpg
+*.jpeg
+*.png
+*.bmp
+
+# Ignore documentation and instructions
+README.md
+INSTRUCOES_APK.md
+DEPLOY.md
+LICENSE
+
+# Ignore git
+.git/
+.gitignore
