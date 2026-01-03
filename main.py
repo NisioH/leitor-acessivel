@@ -13,6 +13,9 @@ import requests
 import base64
 import shutil
 
+# Pasta global para uploads
+UPLOAD_DIR = os.path.abspath("uploads")
+
 def check_tesseract_available():
     tesseract_bin = shutil.which("tesseract")
     if tesseract_bin:
@@ -125,7 +128,7 @@ def main(page: ft.Page):
                     self.path = path
                     self.bytes = None
             
-            uploaded_file_path = os.path.join(os.getcwd(), "uploads", e.file_name)
+            uploaded_file_path = os.path.join(UPLOAD_DIR, e.file_name)
             process_file(FakeFileInfo(e.file_name, uploaded_file_path))
         elif e.error:
             loading_indicator.visible = False
@@ -134,6 +137,7 @@ def main(page: ft.Page):
 
     def process_file(file_info):
         loading_indicator.visible = True
+        text_field.value = ""  # Limpa o texto anterior
         page.update()
 
         file_bytes = getattr(file_info, "bytes", None)
@@ -229,8 +233,13 @@ def main(page: ft.Page):
                 if extracted_text.strip():
                     extracted_text = f"{extracted_text}\n\n---\n{ocr_method_used}"
 
-                text_field.value = extracted_text if extracted_text.strip() else "Nenhum texto encontrado."
+            # Atualizar o campo de texto com o resultado (seja imagem ou documento)
+            text_field.value = extracted_text if extracted_text.strip() else "Nenhum texto encontrado."
+                
         except Exception as ex:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Erro ao processar arquivo: {ex}\n{error_details}")
             text_field.value = f"Erro ao processar arquivo: {ex}"
 
         loading_indicator.visible = False
@@ -298,36 +307,40 @@ def main(page: ft.Page):
             audio_name = f"leitura_{timestamp}.mp3"
 
             # Pasta de uploads (funciona no PC e será incluída no APK)
-            upload_dir = "uploads"
-            if not os.path.exists(upload_dir):
+            if not os.path.exists(UPLOAD_DIR):
                 try:
-                    os.makedirs(upload_dir)
+                    os.makedirs(UPLOAD_DIR)
                 except Exception:
-                    upload_dir = tempfile.gettempdir()
+                    pass
             
-            audio_path_save = os.path.join(upload_dir, audio_name)
+            audio_path_save = os.path.join(UPLOAD_DIR, audio_name)
 
             # Limpar áudios antigos
-            for f in os.listdir(upload_dir):
+            for f in os.listdir(UPLOAD_DIR):
                 if f.startswith("leitura_") and f.endswith(".mp3"):
                     try:
-                        os.remove(os.path.join(upload_dir, f))
+                        os.remove(os.path.join(UPLOAD_DIR, f))
                     except Exception:
                         pass
 
             tts = gTTS(text=text_value, lang='pt')
             tts.save(audio_path_save)
 
+            # O segredo é usar o prefixo '/' para arquivos em assets_dir/upload_dir
+            audio_url = f"/{audio_name}"
+
             if audio_player is None:
-                audio_player = ft.Audio(src=audio_name, autoplay=False)
+                audio_player = ft.Audio(src=audio_url, autoplay=False)
                 page.overlay.append(audio_player)
                 audio_added = True
             else:
-                audio_player.src = audio_name
+                audio_player.src = audio_url
                 if not audio_added:
                     page.overlay.append(audio_player)
                     audio_added = True
             
+            page.update() # Atualiza para garantir que o player carregou o novo src
+
             audio_player.volume = 1
 
             download_button.visible = True
@@ -486,9 +499,10 @@ def get_local_ip():
 
 
 if __name__ == "__main__":
-    if not os.path.exists("uploads"):
+    # Garantir caminho absoluto para evitar erros de diretório
+    if not os.path.exists(UPLOAD_DIR):
         try:
-            os.makedirs("uploads")
+            os.makedirs(UPLOAD_DIR)
         except:
             pass
 
@@ -497,6 +511,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print("🚀 Iniciando Leitor Acessível...")
     print("=" * 60)
+    print(f"📁 Pasta de uploads: {UPLOAD_DIR}")
 
     local_ip = get_local_ip()
 
@@ -514,10 +529,10 @@ if __name__ == "__main__":
         ft.app(
             target=main,
             view=ft.AppView.WEB_BROWSER,
-            upload_dir="uploads",
-            assets_dir="uploads",
+            upload_dir=UPLOAD_DIR,
+            assets_dir=UPLOAD_DIR,
             port=8550,
         )
     except Exception as e:
         print(f"⚠️ Erro ao iniciar: {e}")
-        ft.app(target=main, upload_dir="uploads", assets_dir="uploads")
+        ft.app(target=main, upload_dir=UPLOAD_DIR, assets_dir=UPLOAD_DIR)
